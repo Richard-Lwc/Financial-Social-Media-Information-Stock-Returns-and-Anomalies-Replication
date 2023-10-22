@@ -1,0 +1,1 @@
+I deleted the anomaly_rank.dta cuz it's too large. But since it's a intermediate file, you could simply run "表7 金融社交媒体与市场异象.do" to generate it.

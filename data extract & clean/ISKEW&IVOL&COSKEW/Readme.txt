@@ -1,0 +1,1 @@
+Firstly, use "ISKEW&IVOL&COSKEW.do" to generate "ff3_residual.csv" and "ff3_residual.dta" (Which I didn't upload due to the huge size), then use "ISKEW&IVOL&COSKEW.R" to get ISKEW&IVOL&COSKEW factor data.

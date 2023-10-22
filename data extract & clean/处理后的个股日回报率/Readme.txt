@@ -1,0 +1,1 @@
+Due to enormous size of daily return csv, I have to drop them. But it's totally available at CSMAR, could get it without much effort.

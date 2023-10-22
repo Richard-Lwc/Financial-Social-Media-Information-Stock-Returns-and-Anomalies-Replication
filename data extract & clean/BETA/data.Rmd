@@ -1,0 +1,173 @@
+---
+title: "data.Rmd"
+author: "Menghan Wang"
+date: "2023-06-01"
+output: html_document
+---
+#加载包
+```{r}
+library(tidyverse)
+library(xts)
+library(tseries)
+library(zoo)
+library(lubridate)
+library(dplyr)
+library(haven)
+
+```
+
+
+#导入数据
+```{r}
+#导入无风险收益率
+risk_free_rate1 <- read_csv("RF.csv") |>
+  select(-Year,-Month)
+#导入月个股收益率
+month_yield1 <- read_csv("月个股回报率/TRD_Mnth.csv")
+#导入月末总市值
+me1 <- read_csv("月个股总市值/TRD_Mnth.csv")
+```
+
+
+#BETA
+##计算MKt
+```{r}
+#检查日期格式
+unique(me1$Trdmnt)
+me1$Trdmnt <- as.yearmon(me1$Trdmnt,"%Y-%m")
+#剔除每月市值后30%的小股票
+data1 <- me1 |>
+  arrange(Trdmnt,desc(Msmvttl)) |>
+  group_by(Trdmnt) |>
+  mutate(num_to_keep = ceiling(0.7 * n())) |>
+# 在每个月内，按股票的平均股价从高到低进行排序，并计算要保留的股票数量
+  filter(row_number() <= num_to_keep) |>
+  select(Trdmnt, Stkcd,Msmvttl) |>
+  ungroup()
+```
+
+```{r}
+#个股月收益率数据处理
+month_yield1$Trdmnt <- as.yearmon(month_yield1$Trdmnt,"%Y-%m")
+month_yield2 <- month_yield1 |>
+  arrange(Trdmnt) |>
+  drop_na()
+```
+
+```{r}  
+#计算市值加权的月度市场综合收益率，命名为"ret"
+data2 <- data1 |>
+  left_join(month_yield2,by=c("Trdmnt","Stkcd")) |>
+  drop_na()|>
+  group_by(Trdmnt) |>
+  summarise(ret = weighted.mean(Mretwd, Msmvttl), .groups = "drop")
+```
+
+
+##计算超额收益
+```{r}
+#综合市场超额收益,命名为“exret_mkt
+risk_free_rate1$month <- gsub("m", "-", risk_free_rate1$month)
+risk_free_rate1$month <- as.yearmon(risk_free_rate1$month,"%Y-%m")
+risk_free_rate2 <- risk_free_rate1 |>
+  rename(Trdmnt=month) |>
+  filter(Trdmnt >= "1月 2005" & Trdmnt <= "12月 2019")
+
+data3 <- data2 |>
+  left_join(risk_free_rate2,by="Trdmnt") |>
+  mutate(exret_mkt = ret-rf) |>
+  select(Trdmnt,exret_mkt)
+
+```
+
+
+```{r}
+#股票超额收益,命名为“exret_stk"
+data4 <- month_yield2 |>
+  left_join(risk_free_rate2,by="Trdmnt")|>
+  mutate(exret_stk=Mretwd-rf)|>
+  select(Stkcd,Trdmnt,exret_stk)
+```
+
+
+## 实现滚动回归并计算beta值
+
+```{r}
+data5 <- data4 |>
+  left_join(data3,by="Trdmnt") |>
+  arrange(Stkcd,Trdmnt)
+  
+```
+
+
+```{r}
+#编写函数实现回归并返回beta值，设x为48个月内某股票的超额收益数据，y为这48个月内的市场超额收益数据
+my_regression <- function(x, y){
+   y_lag <- lag(y, 1) # 滞后一期的y值
+   model <- lm(x ~ y + y_lag) # 回归分析
+   coefficient_sum <-as.numeric(model$coefficients[2])+
+     as.numeric(model$coefficients[3])
+   # 计算y和y_lag的系数之和
+   return(coefficient_sum)
+}
+```
+
+
+```{r}
+#编写函数实现滚动回归
+rolling_regression <- function(x, y, window_size){
+  #考虑到有些股票存续时间可能少于48个月
+  if(length(x)<window_size){
+    results <- rep(NA,length(x))
+  }else{
+    results <- rep(NA,window_size-1)
+    for (i in 1:(length(x)-window_size+1)){
+      x_window <- x[i:(i+window_size-1)]
+      y_window <- y[i:(i+window_size-1)]
+      res <- my_regression(x_window, y_window)
+      results[i+window_size-1] <- res
+    }
+  }
+  
+  return(results)
+}
+```
+
+
+```{r}
+
+#计算beta
+result <- data5 |>
+  group_by(Stkcd) |>
+  mutate(beta=rolling_regression(exret_stk,exret_mkt,48)) |>
+  ungroup()
+
+```
+
+
+```{r}
+beta <- result |>
+  select(-exret_stk,-exret_mkt) |>
+  filter(Trdmnt >= "1月 2009")
+sum(is.na(beta$beta))
+#beta[is.na(beta)] = 0
+
+write_csv(beta,"beta.csv")
+
+```
+
+```{r}
+beta_dta <- beta |>
+  mutate(Trdmnt=as.character(Trdmnt)) |>
+  separate(Trdmnt,into = c("Month","Year"),convert = FALSE)
+
+beta_dta$Month <- str_pad(beta_dta$Month, width = 2, pad = "0", side = "left")
+
+
+
+beta_dta <- beta_dta |>
+  unite("Trdmnt",c("Year","Month"),sep = "-")
+
+write_dta(beta_dta,"beta.dta",version = 15)
+```
+

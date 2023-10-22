@@ -1,0 +1,100 @@
+---
+title: "tbl4.Rmd"
+author: "Menghan Wang"
+date: "2023-06-20"
+output: html_document
+---
+
+```{r}
+
+library(tidyverse)
+```
+
+
+```{r}
+A1 <- read_csv("tbl4A.csv")
+B1 <- read_csv("tbl4B.csv")
+C1 <- read_csv("tbl4C.csv")
+D1 <- read_csv("tbl4D.csv")
+
+```
+
+```{r}
+tbl4 <- matrix('',nrow = 22,ncol=13)
+```
+
+```{r}
+tbl4[1,4] <- "Panel A: ME "
+tbl4[1,10] <- "Panel B: EP "
+tbl4[2,3]  <- "Value-weighted"
+tbl4[2,5]  <- "Equal-weighted"
+tbl4[2,7]  <- "Value-weighted"
+tbl4[2,9]  <- "Equal-weighted"
+tbl4[3,2:13] <- rep(c("S","M","B"),4)
+tbl4[4:11,1] <- c("L","t","H","t","H-L","t","Alpha","t")
+
+tbl4[12,4] <- "Panel A: ME "
+tbl4[12,10] <- "Panel B: EP "
+tbl4[13,3]  <- "Value-weighted"
+tbl4[13,5]  <- "Equal-weighted"
+tbl4[13,7]  <- "Value-weighted"
+tbl4[13,9]  <- "Equal-weighted"
+tbl4[14,2:13] <- rep(c("S","M","B"),4)
+tbl4[15:22,1] <- c("L","t","H","t","H-L","t","Alpha","t")
+
+
+```
+
+#先把A装进去
+```{r}
+A1 <- as.matrix(A1)
+for (i in 2:5) {
+  for (j in 1:6) {
+    tbl4[(2*i):(2*i+1),j+1] <- A1[(i-1),(2*j):(2*j+1)]
+  }
+}
+```
+
+#把B装进去
+```{r}
+B1 <- as.matrix(B1)
+for (i in 2:5) {
+  for (j in 1:6) {
+    tbl4[(2*i):(2*i+1),j+7] <- B1[(i-1),(2*j):(2*j+1)]
+  }
+}
+```
+
+#把C装进去
+```{r}
+C1 <- as.matrix(C1)
+for (i in 2:5) {
+  for (j in 1:6) {
+    tbl4[(2*i+11):(2*i+12),j+1] <- C1[(i-1),(2*j):(2*j+1)]
+  }
+}
+
+```
+
+#把D装进去
+```{r}
+D1 <- as.matrix(D1)
+for (i in 2:5) {
+  for (j in 1:6) {
+    tbl4[(2*i+11):(2*i+12),j+7] <- D1[(i-1),(2*j):(2*j+1)]
+  }
+}
+
+```
+
+
+```{r}
+
+write.csv(tbl4,file = "table4.csv")
+
+```
+
+```{r}
+
+
+```

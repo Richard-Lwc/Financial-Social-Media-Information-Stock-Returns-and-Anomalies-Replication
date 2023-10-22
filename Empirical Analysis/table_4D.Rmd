@@ -1,0 +1,296 @@
+---
+title: "table_4"
+author: "Menghan Wang"
+date: "2023-06-06"
+output: html_document
+---
+#加载包 
+```{r}
+library(tidyverse)
+library(xts)
+library(tseries)
+library(zoo)
+library(dplyr)
+library(lmtest)
+library(sandwich)
+```
+
+#编写的函数
+```{r}
+#设置函数计算系数值以及Newey-West t 值，y值为“vw”代表为均值平均，CH3代表CH3模型的alpha，CH4代表CH4模型的alpha，z,w,u,v的默认值为0
+myregression <- function(x,y,z=0,w=0,u=0,v=0){
+  
+  if(y=="vw"){
+    model <- lm(x~1)
+  }else if(y=="CH3"){
+    model <- lm(x~z+w+u)
+  }else{
+    model <- lm(x~z+w+u+v)
+  }
+
+  nw <- NeweyWest(model,lag=24,adjust = T)
+  ttest <- coeftest(model, vcov = nw)[1,]
+  return(c(ttest[1],ttest[3]))
+}
+```
+
+##设置储存结果的表
+```{r}
+tblD <- matrix(NA,nrow = 4,ncol=12,
+               dimnames=list(c("L", "H", "H-L","Alpha"),
+                             c("S","S_t","M","M_t","B","B_t",
+                               "E_S","E_S_t","E_M","E_M_t","E_B","E_B_t")))
+
+```
+
+#Panel D  INST 机构投资者持股比率
+##按照 t 月套利成本指标的大小以 30%和 70%为分位点将股票分为三个投资组合，在每个组中进一步按照 FI 分成十组并求出超额市值加权收益率和超额等权收益率
+```{r}
+INST1 <- read_csv("C:/Users/ASUS/Desktop/LEARN/金融建模/金融建模/INST/INST.csv")
+FI1 <- read_csv("C:/Users/ASUS/Desktop/LEARN/金融建模/金融建模/GUBA_上市公司股吧帖子统计（自然日）_ALL/FI.csv")
+exret <- read_csv("C:/Users/ASUS/Desktop/LEARN/金融建模/金融建模/处理后的个股月超额收益率/refined monthly exret.csv")
+CH3 <- read_csv("C:/Users/ASUS/Desktop/LEARN/金融建模/金融建模/CH3&CH4/CH3.csv")
+CH4 <- read_csv("C:/Users/ASUS/Desktop/LEARN/金融建模/金融建模/CH3&CH4/CH4.csv")
+
+
+#股票代码格式统一
+FI1$Stkcd <- str_pad(FI1$Stkcd, width = 6, pad = "0", side = "left")
+exret$Stkcd <- str_pad(exret$Stkcd, width = 6, pad = "0", side = "left")
+
+#提取日期
+Date1 <- FI1 |>
+  select(Stkcd,Year,Month)
+
+INST1 <- INST1 |>
+  separate(EndDate, c("Year","Month","Day"),sep = "-",convert = T) |>
+  mutate(Year=as.numeric(Year),
+         Month=as.numeric(Month)) |>
+  rename(Stkcd=Symbol,INST=InsInvestorProp)
+
+InST2 <- Date1 |> mutate(Stkcd = as.numeric(Stkcd)) |>
+  left_join(INST1,by=c("Stkcd","Year","Month")) %>% 
+  fill(INST) %>% rename(INST_filled=INST)
+
+# InST2$INST_filled <- c(NA,NA,na.locf(InST2$INST)) #由于没有上期末的数据所以有两个缺失值
+
+```
+
+
+#处理后的收益率左连接信息指数，每个表都需要此数据
+```{r}
+data <- exret |>
+  left_join(FI1,by = c("Stkcd","Year","Month")) |>
+  mutate(Ri=Ri*100)
+
+```
+
+##滞后分组指标INST与FI
+```{r}
+InST2$INST_lag <- lag(InST2$INST_filled)
+
+dataD1 <- data |> mutate(Stkcd = as.numeric(Stkcd)) |>
+  left_join(InST2,by=c("Stkcd","Year","Month"))
+```
+
+```{r}
+dataD2 <- dataD1 |>
+  select(Stkcd,Year,Month,lag_FI,Mretwd,rf,Ri,Msmvttl,INST_lag) |>
+  drop_na()
+```
+
+##按照 t 月套利成本指标的大小以 30%和 70%为分位点将股票分为三个投资组合
+```{r}
+dataD3 <- dataD2 |>
+  group_by(Year, Month) %>% 
+  mutate(group_INST = cut(INST_lag, 
+                     quantile(INST_lag, c(0, 0.3, 0.7, 1)), 
+                     labels = c("S", "M", "B")))
+```
+
+##在每个组中进一步按照 FI 分成十组
+```{r}
+dataD4 <- dataD3 |>
+  group_by(Year,Month,group_INST) |>
+  drop_na() |>
+  mutate(group_FI=cut(lag_FI, 
+                     quantile(lag_FI, probs = seq(0, 1, by = 0.1)), 
+                     include.lowest = TRUE,
+                     labels = 1:10)) |>
+  mutate(group_INST_FI = paste0(group_INST,group_FI))
+
+
+```
+
+
+#超额市值加权收益率
+```{r}
+#计算超额收益并且将长表变成宽表，然后筛选出需要的组合H、L和HL
+dataD5 <- dataD4 |>
+  group_by(Year,Month,group_INST_FI) |>
+  summarise(exret_mkt_weight=weighted.mean(Ri, Msmvttl), .groups = "drop") |>
+  pivot_wider(names_from = group_INST_FI, values_from = exret_mkt_weight) |>
+  select(-(B2:B9),-(S2:S9),-(M2:M9))|>
+  mutate(SHL=S10-S1,
+         MHL=M10-M1, 
+         BHL=B10-B1) |>
+  select(Year,Month,S1,S10,SHL,M1,M10,MHL,B1,B10,BHL)
+```
+
+
+
+##计算双变量分组的组合指标
+```{r}
+#S
+for (i in 1:3) {
+  # value-weighted模型
+  tblD[i,1] <- myregression(dataD5[[i+2]],"vw")[1]
+  tblD[i,2] <- myregression(dataD5[[i+2]],"vw")[2]
+  
+}
+
+#M
+for (i in 1:3) {
+  # value-weighted模型
+  tblD[i,3] <- myregression(dataD5[[i+5]],"vw")[1]
+  tblD[i,4] <- myregression(dataD5[[i+5]],"vw")[2]
+}
+
+#B
+for (i in 1:3) {
+  # value-weighted模型
+  tblD[i,5] <- myregression(dataD5[[i+8]],"vw")[1]
+  tblD[i,6] <- myregression(dataD5[[i+8]],"vw")[2]
+}
+
+```
+
+## 按照INST的分组计算CH3和CH4的alpha
+```{r}
+dataD6 <- dataD3 |>
+  drop_na()|>
+  group_by(Year,Month,group_INST) |>
+  summarise(exret_mkt_weight=weighted.mean(Ri, Msmvttl), .groups = "drop") |>
+  pivot_wider(names_from = group_INST, values_from = exret_mkt_weight)|>
+  left_join(CH3,by=c("Year","Month")) |>
+  left_join(CH4,by=c("Year","Month","mktrf"))
+```
+
+```{r}
+#暂且计算CH3
+for (i in 1:3) {
+  # value-weighted模型
+  tblD[4,2*i-1] <- 
+    myregression(dataD6[[i+2]],"CH3",dataD6$mktrf,dataD6$SMB,dataD6$VMG)[1]
+  tblD[4,2*i] <- 
+    myregression(dataD6[[i+2]],"CH3",dataD6$mktrf,dataD6$SMB,dataD6$VMG)[2]
+}
+```
+
+
+#超额等权收益率
+```{r}
+dataD7 <-  dataD4 |>
+  group_by(Year,Month,group_INST_FI) |>
+  summarise(exret_eql_weight=mean(Ri), .groups = "drop") |>
+  pivot_wider(names_from = group_INST_FI, values_from = exret_eql_weight) |>
+  select(-(B2:B9),-(S2:S9),-(M2:M9))|>
+  mutate(SHL=S10-S1,
+         MHL=M10-M1, 
+         BHL=B10-B1) |>
+  select(Year,Month,S1,S10,SHL,M1,M10,MHL,B1,B10,BHL)
+```
+
+##计算双变量分组的组合指标
+```{r}
+
+#双变量分组
+#S
+for (i in 1:3) {
+  # value-weighted模型
+  tblD[i,7] <- myregression(dataD7[[i+2]],"vw")[1]
+  tblD[i,8] <- myregression(dataD7[[i+2]],"vw")[2]
+}
+
+#M
+for (i in 1:3) {
+  # value-weighted模型
+  tblD[i,9] <- myregression(dataD7[[i+5]],"vw")[1]
+  tblD[i,10] <- myregression(dataD7[[i+5]],"vw")[2]
+}
+
+#B
+for (i in 1:3) {
+  # value-weighted模型
+  tblD[i,11] <- myregression(dataD7[[i+8]],"vw")[1]
+  tblD[i,12] <- myregression(dataD7[[i+8]],"vw")[2]
+}
+
+```
+
+## 按照ME的分组计算CH3和CH4的alpha
+```{r}
+dataD8 <- dataD3 |>
+  drop_na()|>
+  group_by(Year,Month,group_INST) |>
+  summarise(exret_eql_weight=mean(Ri), .groups = "drop") |>
+  pivot_wider(names_from = group_INST, values_from = exret_eql_weight)|>
+  left_join(CH3,by=c("Year","Month")) |>
+  left_join(CH4,by=c("Year","Month","mktrf"))
+```
+
+```{r}
+#暂且计算CH3
+for (i in 1:3) {
+  # value-weighted模型
+  tblD[4,2*i+5] <- 
+    myregression(dataD8[[i+2]],"CH3",dataD8$mktrf,dataD8$SMB,dataD8$VMG)[1]
+  tblD[4,2*i+6] <- 
+    myregression(dataD8[[i+2]],"CH3",dataD8$mktrf,dataD8$SMB,dataD8$VMG)[2]
+}
+```
+
+# 导出表D
+```{r}
+
+starsD <-  matrix(0, nrow = 4,ncol=12)
+
+df_r_ret <- 131
+df_r_alpha <- 128 #CH3
+
+# 计算每个系数在不同的显著性水平上的显著性，并将结果存储在"stars"矩阵中
+# 前三行和后面的自由度不同
+for (k in 1:3) {
+  for (v in seq(from = 1, to = 11, by = 2)) {
+    starsD[k, v] <- (abs(tblD[k, v + 1]) > abs(qt(0.1/2, df_r_ret))) + 
+                   (abs(tblD[k, v + 1]) > abs(qt(0.05/2, df_r_ret))) + 
+                   (abs(tblD[k, v + 1]) > abs(qt(0.01/2, df_r_ret)))
+  }
+}
+
+for (v in seq(from = 1, to = 11, by = 2)) {
+    starsD[4, v] <- (abs(tblD[4, v + 1]) > abs(qt(0.1/2, df_r_alpha))) + 
+                   (abs(tblD[4, v + 1]) > abs(qt(0.05/2, df_r_alpha))) + 
+                   (abs(tblD[4, v + 1]) > abs(qt(0.01/2, df_r_alpha)))}
+
+```
+
+```{r}
+#保留两位小数
+tblD1 <- round(tblD,digits = 2)
+tblD1 <- matrix(c(as.character(tblD1)),nrow=4)
+
+
+tblD1[starsD == 1] <- sub("^(.*)$", "\\1*", tblD1[starsD == 1])
+tblD1[starsD == 2] <- sub("^(.*)$", "\\1**", tblD1[starsD == 2])
+tblD1[starsD == 3] <- sub("^(.*)$", "\\1***", tblD1[starsD == 3])
+
+
+```
+
+
+```{r}
+
+write.csv(tblD1, file="tbl4D.csv")
+
+```
+

@@ -10,6 +10,7 @@ An attempt to replicate the tables and figures of the paper "Financial social me
 Stata
 R
 Python
+
 Reference:
 
 WANG Haomiao, SHI Yongdong. Financial social media information, stock returns, and anomalies[J]. Systems Engineering - Theory & Practice, 2023, 43(6): 1597-1609 https://doi.org/10.12011/SETP2022-2306
